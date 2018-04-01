@@ -83,3 +83,7 @@ cat << EOF > /jenkins_home/ansible_hosts.txt
 [prod]
 127.0.0.1
 EOF
+
+echo "**************"
+echo "创建完成，请访问jenkins页面构建后，访问本机9999端口。"
+echo "**************"
