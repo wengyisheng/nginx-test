@@ -61,7 +61,7 @@ fi
 #install jenkins cli
 cd ${JENKINS_HOME} && sudo wget http://${host_ip}:8899/jnlpJars/jenkins-cli.jar
 
-git clone https://github.com/xcl001987/nginx-test.git
+cd ${filepath} && git clone https://github.com/xcl001987/nginx-test.git
 cp ${filepath}/nginx-test/test_job_config.xml /${JENKINS_HOME}
 cp ${filepath}/nginx-test/test.yml /${JENKINS_HOME}
 sed -i "s/10.82.12.62/${host_ip}/" /${JENKINS_HOME}/test_job_config.xml
