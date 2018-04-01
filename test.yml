@@ -1,0 +1,7 @@
+- hosts: '{{host_group}}'
+  tasks:
+    - name: 'stop docker'
+      shell: "docker_id=`docker ps --filter name='nginx-test' -q` && (docker stop ${docker_id} || exit 0) && sleep 10" 
+    - name: 'run docker'
+      shell: 'docker run -d --name=nginx-test -p 9999:80 nginx:{{version}}'
+...
