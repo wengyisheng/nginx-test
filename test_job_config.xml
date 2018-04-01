@@ -44,7 +44,7 @@
   <builders>
     <hudson.tasks.Shell>
       <command>ssh -o stricthostkeychecking=no root@10.82.12.62 &quot;cd /jenkins_home/workspace/${JOB_NAME} &amp;&amp; docker build -t nginx:${BUILD_NUMBER} .&quot;
-ssh -o stricthostkeychecking=no root@10.82.12.62 &quot;ansible-playbook -i /jenkins_home/ansible_hosts.txt -e host_group=${env} -e version=${BUILD_NUMBER} /jenkins_home/test.yml&quot;</command>
+ssh -o stricthostkeychecking=no root@10.82.12.62 &quot;ansible-playbook -i ~/ansible_hosts.txt -e host_group=${env} -e version=${BUILD_NUMBER} ~/test.yml&quot;</command>
     </hudson.tasks.Shell>
   </builders>
   <publishers/>
