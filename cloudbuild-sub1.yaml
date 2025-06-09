@@ -1,7 +1,6 @@
 # cloudbuild-sub.yaml
 
-# IMPORTANT: Replace 'gs://wys-test' with your actual bucket name for logs.
-logsBucket: 'gs://wys-test'
+logsBucket: 'gs://wys-test' # IMPORTANT: Replace with your actual bucket name for logs.
 
 steps:
   # 步骤 1: 克隆 Git 仓库
@@ -10,6 +9,7 @@ steps:
     id: 'clone-repo'
 
   # 步骤 2: 获取 Git Tag 作为镜像版本
+  # 将GIT_TAG直接写入一个文件，后续步骤通过source来获取
   - name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
     args:
@@ -20,36 +20,42 @@ steps:
           echo "Error: No Git tag found. Please tag your repository."
           exit 1
         fi
-        echo "GIT_TAG=$GIT_TAG" | tee /workspace/git_tag.env
+        echo "export GIT_TAG=$GIT_TAG" > /workspace/env_vars.sh # 注意这里使用了 export
     id: 'get-git-tag'
     
   # 步骤 3: 构建 Docker 镜像
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash' # 使用 bash 作为入口点来执行 source 命令
     args:
-      - 'build'
-      - '-f'
-      - 'Dockerfile'
-      - '-t'
-      - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$(cat /workspace/git_tag.env | grep GIT_TAG | cut -d= -f2)'
-      - '.'
+      - '-c'
+      - |
+        source /workspace/env_vars.sh # 载入环境变量
+        docker build -f Dockerfile -t us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG .
     id: 'build-docker-image'
+    waitFor: ['get-git-tag'] # 确保在获取到tag后才构建
 
-  # 4. 推送 Docker 镜像到 Artifact Registry
+  # 步骤 4: 推送 Docker 镜像到 Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash' # 使用 bash 作为入口点来执行 source 命令
     args:
-      - 'push'
-      - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$(cat /workspace/git_tag.env | grep GIT_TAG | cut -d= -f2)'
+      - '-c'
+      - |
+        source /workspace/env_vars.sh # 载入环境变量
+        docker push us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG
     id: 'push-to-artifact-registry'
+    waitFor: ['build-docker-image'] # 确保在构建后才推送
 
-  # 5. 在测试实例上运行 Docker 镜像进行测试
+  # 步骤 5: 在测试实例上运行 Docker 镜像进行测试
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        source /workspace/env_vars.sh # 载入环境变量
+        
         INSTANCE_NAME="tp-link-dev-gpu-2"
         ZONE="us-east1-c"
-        IMAGE_NAME="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$(cat /workspace/git_tag.env | grep GIT_TAG | cut -d= -f2)"
+        IMAGE_NAME="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG"
         
         echo "Attempting to run Docker on $INSTANCE_NAME in $ZONE..."
         
@@ -74,8 +80,3 @@ steps:
         fi
     id: 'docker-run-test'
     waitFor: ['push-to-artifact-registry'] # 确保在推送镜像成功后才进行测试
-
-# You can still have an 'options' block if you need to configure other build options,
-# but 'logsBucket' is not part of it.
-# options:
-#   machineType: 'E2_HIGHCPU_8' # Example of another option you might use
