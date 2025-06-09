@@ -57,7 +57,7 @@ steps:
     # 替换'gcp-support-test-347006'为您的GCP项目ID。
     # 确保Cloud Build服务帐号拥有SSH到此VM的权限。
     # 如果gcloud ssh连接失败或远程命令执行过程中发生错误，此步骤将失败。
-    gcloud compute ssh tp-link-dev-gpu-2 --zone=us-central1-c --project=gcp-support-test-347006 --strict-host-key-checking=no --command "\
+    gcloud compute ssh tp-link-dev-gpu-2 --zone=us-east1-c --project=gcp-support-test-347006 --strict-host-key-checking=no --command "\
       sudo docker stop nginx-test-container || true && \
       sudo docker rm nginx-test-container || true && \
       sudo docker pull us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME} && \
@@ -76,3 +76,4 @@ options:
   logging: CLOUD_LOGGING_ONLY
   # machineType 可以设置为E2_HIGHCPU_8等更高的机器类型以加快构建速度
   machineType: 'E2_HIGHCPU_8'
+
