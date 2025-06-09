@@ -60,6 +60,7 @@ steps:
     gcloud compute ssh tp-link-dev-gpu-2 --zone=us-east1-c --project=gcp-support-test-347006 --strict-host-key-checking=no --command "\
       sudo docker stop nginx-test-container || true && \
       sudo docker rm nginx-test-container || true && \
+      sudo gcloud auth configure-docker us-east1-docker.pkg.dev \
       sudo docker pull us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME} && \
       sudo docker run -d --name nginx-test-container -p 80:80 us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME} \
     "
