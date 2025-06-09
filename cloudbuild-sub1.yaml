@@ -20,38 +20,43 @@ steps:
           echo "Error: No Git tag found. Please tag your repository."
           exit 1
         fi
-        echo "export GIT_TAG=$GIT_TAG" > /workspace/env_vars.sh # 注意这里使用了 export
+        echo "export GIT_TAG=$GIT_TAG" > /workspace/build_env.sh # 将变量写入一个脚本文件
+        echo "Successfully got GIT_TAG: $GIT_TAG"
     id: 'get-git-tag'
     
   # 步骤 3: 构建 Docker 镜像
   - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash' # 使用 bash 作为入口点来执行 source 命令
+    entrypoint: 'bash' # 强制使用 bash
     args:
       - '-c'
       - |
-        source /workspace/env_vars.sh # 载入环境变量
-        docker build -f Dockerfile -t us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG .
+        source /workspace/build_env.sh # 加载环境变量
+        IMAGE_FULL_PATH="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG"
+        echo "Building Docker image: $IMAGE_FULL_PATH"
+        docker build -f Dockerfile -t "${IMAGE_FULL_PATH}" .
     id: 'build-docker-image'
     waitFor: ['get-git-tag'] # 确保在获取到tag后才构建
 
   # 步骤 4: 推送 Docker 镜像到 Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash' # 使用 bash 作为入口点来执行 source 命令
+    entrypoint: 'bash' # 强制使用 bash
     args:
       - '-c'
       - |
-        source /workspace/env_vars.sh # 载入环境变量
-        docker push us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG
+        source /workspace/build_env.sh # 加载环境变量
+        IMAGE_FULL_PATH="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG"
+        echo "Pushing Docker image: $IMAGE_FULL_PATH"
+        docker push "${IMAGE_FULL_PATH}"
     id: 'push-to-artifact-registry'
     waitFor: ['build-docker-image'] # 确保在构建后才推送
 
   # 步骤 5: 在测试实例上运行 Docker 镜像进行测试
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'bash'
+    entrypoint: 'bash' # 强制使用 bash
     args:
       - '-c'
       - |
-        source /workspace/env_vars.sh # 载入环境变量
+        source /workspace/build_env.sh # 加载环境变量
         
         INSTANCE_NAME="tp-link-dev-gpu-2"
         ZONE="us-east1-c"
@@ -63,7 +68,8 @@ steps:
         gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker stop nginx-test-container || true && docker rm nginx-test-container || true"
         
         # 运行新的Docker容器
-        gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker run -d --name nginx-test-container -p 80:80 ${IMAGE_NAME}"
+        # 使用双引号确保变量被正确展开，并避免shell注入问题
+        gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker run -d --name nginx-test-container -p 80:80 \"${IMAGE_NAME}\""
         
         # 简单验证容器是否运行，您可以根据需要添加更复杂的健康检查
         echo "Waiting for container to start..."
