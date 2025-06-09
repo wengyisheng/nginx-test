@@ -72,3 +72,8 @@ steps:
         fi
     id: 'docker-run-test'
     waitFor: ['push-to-artifact-registry'] # 确保在推送镜像成功后才进行测试
+
+options:
+  # 替换为您的日志存储桶的名称
+  # 格式为 gs://your-bucket-name
+  logsBucket: 'gs://wys-test'
