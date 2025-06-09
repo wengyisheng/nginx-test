@@ -1,88 +1,78 @@
 # cloudbuild-sub.yaml
-
-logsBucket: 'gs://wys-test' # IMPORTANT: Replace with your actual bucket name for logs.
+#
+# 此Cloud Build配置文件用于：
+# 1. 从Git仓库构建Docker镜像。
+# 2. 将构建的镜像推送到Google Artifact Registry。
+# 3. 在指定的GCE实例上停止旧容器、拉取新镜像并运行新容器进行测试部署。
 
 steps:
-  # 步骤 1: 克隆 Git 仓库
-  - name: 'gcr.io/cloud-builders/git'
-    args: ['clone', 'https://github.com/wengyisheng/nginx-test', '.']
-    id: 'clone-repo'
+# 步骤1: 构建Docker镜像
+# 使用gcr.io/cloud-builders/docker构建器来执行Docker build命令。
+# -t 参数用于标记镜像，${_IMAGE_NAME} 是自定义替换变量，TAG_NAME是Cloud Build内置的标签名称变量。
+# . 表示Docker上下文为当前目录（即代码库的根目录）。
+# -f Dockerfile 明确指定Dockerfile的文件名为'Dockerfile'。
+# 任何 Docker build 错误（例如，Dockerfile 语法错误或依赖下载失败）都将导致此步骤失败。
+- name: 'gcr.io/cloud-builders/docker'
+  id: '构建Docker镜像' # 步骤ID
+  args:
+  - 'build'
+  - '-t'
+  - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME}'
+  - '.'
+  - '-f'
+  - 'Dockerfile'
+  # 关于“代码加密”的说明：
+  # 如果您的Dockerfile需要特殊参数或环境变量来处理加密的代码，
+  # 可以在此处添加 --build-arg 或 ENV 参数。
+  # 例如：- '--build-arg'
+  #      - 'DECRYPTION_KEY=${_DECRYPTION_KEY}' # 假设_DECRYPTION_KEY是一个秘密替换变量或普通替换变量
 
-  # 步骤 2: 获取 Git Tag 作为镜像版本
-  # 将GIT_TAG直接写入一个文件，后续步骤通过source来获取
-  - name: 'gcr.io/cloud-builders/gcloud'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        GIT_TAG=$(git describe --tags --abbrev=0)
-        if [ -z "$GIT_TAG" ]; then
-          echo "Error: No Git tag found. Please tag your repository."
-          exit 1
-        fi
-        echo "export GIT_TAG=$GIT_TAG" > /workspace/build_env.sh # 将变量写入一个脚本文件
-        echo "Successfully got GIT_TAG: $GIT_TAG"
-    id: 'get-git-tag'
-    
-  # 步骤 3: 构建 Docker 镜像
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash' # 强制使用 bash
-    args:
-      - '-c'
-      - |
-        source /workspace/build_env.sh # 加载环境变量
-        IMAGE_FULL_PATH="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG"
-        echo "Building Docker image: $IMAGE_FULL_PATH"
-        docker build -f Dockerfile -t "${IMAGE_FULL_PATH}" .
-    id: 'build-docker-image'
-    waitFor: ['get-git-tag'] # 确保在获取到tag后才构建
+# 步骤2: 推送Docker镜像到Artifact Registry
+# 使用gcr.io/cloud-builders/docker构建器将标记的镜像推送到目标Artifact Registry仓库。
+# 如果推送失败（例如，权限问题或仓库不可达），此步骤将失败。
+- name: 'gcr.io/cloud-builders/docker'
+  id: '推送至Artifact Registry' # 步骤ID
+  args:
+  - 'push'
+  - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME}'
 
-  # 步骤 4: 推送 Docker 镜像到 Artifact Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash' # 强制使用 bash
-    args:
-      - '-c'
-      - |
-        source /workspace/build_env.sh # 加载环境变量
-        IMAGE_FULL_PATH="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG"
-        echo "Pushing Docker image: $IMAGE_FULL_PATH"
-        docker push "${IMAGE_FULL_PATH}"
-    id: 'push-to-artifact-registry'
-    waitFor: ['build-docker-image'] # 确保在构建后才推送
+# 步骤3: 在测试实例上进行Docker运行测试
+# 使用gcr.io/google.com/cloudsdktool/cloud-sdk构建器连接到GCE实例并执行命令。
+# entrypoint设置为bash以便执行多行命令。
+# --command 参数用于在远程实例上执行一系列Docker命令。
+# 错误处理：
+# - 'sudo docker stop ... || true': 如果容器不存在或停止失败，此命令会成功退出（因为有 || true），允许脚本继续。这是预期行为。
+# - 'sudo docker rm ... || true': 同上，如果容器不存在或删除失败，此命令会成功退出，允许脚本继续。
+# - 'sudo docker pull ... && sudo docker run ...': 使用 '&&' 链式操作。
+#   如果 'pull' 命令失败（例如，镜像不存在，网络问题，认证失败），后续的 'run' 命令将不会执行。
+#   'gcloud compute ssh' 命令会捕捉到远程命令的非零退出代码，从而导致此 Cloud Build 步骤失败。
+#   如果 'pull' 成功但 'run' 失败（例如，端口冲突），此步骤也将失败。
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: '在VM上部署和测试' # 步骤ID
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    # 使用gcloud compute ssh命令连接到GCE实例并执行Docker命令。
+    # 替换'gcp-support-test-347006'为您的GCP项目ID。
+    # 确保Cloud Build服务帐号拥有SSH到此VM的权限。
+    # 如果gcloud ssh连接失败或远程命令执行过程中发生错误，此步骤将失败。
+    gcloud compute ssh tp-link-dev-gpu-2 --zone=us-central1-c --project=gcp-support-test-347006 --strict-host-key-checking=no --command "\
+      sudo docker stop nginx-test-container || true && \
+      sudo docker rm nginx-test-container || true && \
+      sudo docker pull us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME} && \
+      sudo docker run -d --name nginx-test-container -p 80:80 us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME} \
+    "
+    echo "已在tp-link-dev-gpu-2上启动部署和测试。"
 
-  # 步骤 5: 在测试实例上运行 Docker 镜像进行测试
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'bash' # 强制使用 bash
-    args:
-      - '-c'
-      - |
-        source /workspace/build_env.sh # 加载环境变量
-        
-        INSTANCE_NAME="tp-link-dev-gpu-2"
-        ZONE="us-east1-c"
-        IMAGE_NAME="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$GIT_TAG"
-        
-        echo "Attempting to run Docker on $INSTANCE_NAME in $ZONE..."
-        
-        # 停止并删除可能存在的同名容器，避免端口冲突或旧镜像影响
-        gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker stop nginx-test-container || true && docker rm nginx-test-container || true"
-        
-        # 运行新的Docker容器
-        # 使用双引号确保变量被正确展开，并避免shell注入问题
-        gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker run -d --name nginx-test-container -p 80:80 \"${IMAGE_NAME}\""
-        
-        # 简单验证容器是否运行，您可以根据需要添加更复杂的健康检查
-        echo "Waiting for container to start..."
-        sleep 10 # 给予容器启动时间
-        CONTAINER_STATUS=$(gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker ps -f name=nginx-test-container --format '{{.Status}}'")
-        echo "Container status: $CONTAINER_STATUS"
-        
-        if [[ "$CONTAINER_STATUS" != *"Up"* ]]; then
-          echo "Error: Docker container 'nginx-test-container' did not start successfully."
-          gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker logs nginx-test-container"
-          exit 1
-        else
-          echo "Docker container 'nginx-test-container' is running successfully."
-        fi
-    id: 'docker-run-test'
-    waitFor: ['push-to-artifact-registry'] # 确保在推送镜像成功后才进行测试
+# 替换变量 (Substitutions)
+# 您可以在Cloud Build触发器中定义或覆盖这些变量。
+substitutions:
+  _IMAGE_NAME: 'nginx-test' # Docker镜像的名称，这里默认为'nginx-test'。
+
+# 构建选项
+options:
+  # log options 可以是 CLOUD_LOGGING_ONLY (默认) 或 GCS_AND_CLOUD_LOGGING
+  logging: CLOUD_LOGGING_ONLY
+  # machineType 可以设置为E2_HIGHCPU_8等更高的机器类型以加快构建速度
+  machineType: 'E2_HIGHCPU_8'
