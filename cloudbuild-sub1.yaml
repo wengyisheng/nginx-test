@@ -1,0 +1,78 @@
+# cloudbuild-sub.yaml
+steps:
+  # 步骤 1: 克隆 Git 仓库
+  - name: 'gcr.io/cloud-builders/git'
+    args: ['clone', 'https://github.com/wengyisheng/nginx-test', '.']
+    id: 'clone-repo'
+
+  # 步骤 2: 获取 Git Tag 作为镜像版本
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        GIT_TAG=$(git describe --tags --abbrev=0)
+        if [ -z "$GIT_TAG" ]; then
+          echo "Error: No Git tag found. Please tag your repository."
+          exit 1
+        fi
+        echo "GIT_TAG=$GIT_TAG" | tee /workspace/git_tag.env
+    id: 'get-git-tag'
+    
+  # 步骤 3: 构建 Docker 镜像
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'Dockerfile'
+      - '-t'
+      - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$(cat /workspace/git_tag.env | grep GIT_TAG | cut -d= -f2)'
+      - '.'
+    id: 'build-docker-image'
+
+  # 步骤 4: 推送 Docker 镜像到 Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$(cat /workspace/git_tag.env | grep GIT_TAG | cut -d= -f2)'
+    id: 'push-to-artifact-registry'
+
+  # 步骤 5: 在测试实例上运行 Docker 镜像进行测试
+  # 注意: 这一步需要SSH连接到实例并执行docker run
+  # 您可能需要根据您的实际情况调整gcloud compute ssh命令和docker run命令
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        INSTANCE_NAME="tp-link-dev-gpu-2"
+        ZONE="us-east1-c"
+        IMAGE_NAME="us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/nginx-test:$(cat /workspace/git_tag.env | grep GIT_TAG | cut -d= -f2)"
+        
+        echo "Attempting to run Docker on $INSTANCE_NAME in $ZONE..."
+        
+        # 停止并删除可能存在的同名容器，避免端口冲突或旧镜像影响
+        gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker stop nginx-test-container || true && docker rm nginx-test-container || true"
+        
+        # 运行新的Docker容器
+        gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker run -d --name nginx-test-container -p 80:80 ${IMAGE_NAME}"
+        
+        # 简单验证容器是否运行，您可以根据需要添加更复杂的健康检查
+        echo "Waiting for container to start..."
+        sleep 10 # 给予容器启动时间
+        CONTAINER_STATUS=$(gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker ps -f name=nginx-test-container --format '{{.Status}}'")
+        echo "Container status: $CONTAINER_STATUS"
+        
+        if [[ "$CONTAINER_STATUS" != *"Up"* ]]; then
+          echo "Error: Docker container 'nginx-test-container' did not start successfully."
+          gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} --command="docker logs nginx-test-container"
+          exit 1
+        else
+          echo "Docker container 'nginx-test-container' is running successfully."
+        fi
+    id: 'docker-run-test'
+    waitFor: ['push-to-artifact-registry'] # 确保在推送镜像成功后才进行测试
+
+options:
+  # 如果任何步骤失败，则停止构建
+  failure: 'STOP_AND_NOTIFY'
