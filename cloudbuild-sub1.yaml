@@ -72,7 +72,3 @@ steps:
         fi
     id: 'docker-run-test'
     waitFor: ['push-to-artifact-registry'] # 确保在推送镜像成功后才进行测试
-
-options:
-  # 如果任何步骤失败，则停止构建
-  failure: 'STOP_AND_NOTIFY'
