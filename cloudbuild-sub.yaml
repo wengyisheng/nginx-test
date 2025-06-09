@@ -1,0 +1,72 @@
+# cloudbuild-sub.yaml
+#
+# 此Cloud Build配置文件用于：
+# 1. 从Git仓库构建Docker镜像。
+# 2. 将构建的镜像推送到Google Artifact Registry。
+# 3. 在指定的GCE实例上停止旧容器、拉取新镜像并运行新容器进行测试部署。
+
+steps:
+# 步骤1: 构建Docker镜像
+# 使用gcr.io/cloud-builders/docker构建器来执行Docker build命令。
+# -t 参数用于标记镜像，${_IMAGE_NAME} 是自定义替换变量，TAG_NAME是Cloud Build内置的标签名称变量。
+# . 表示Docker上下文为当前目录（即代码库的根目录）。
+# -f Dockerfile 明确指定Dockerfile的文件名为'Dockerfile'。
+- name: 'gcr.io/cloud-builders/docker'
+  id: '构建Docker镜像' # 步骤ID
+  args:
+  - 'build'
+  - '-t'
+  - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME}'
+  - '.'
+  - '-f'
+  - 'Dockerfile'
+  # 关于“代码加密”的说明：
+  # 如果您的Dockerfile需要特殊参数或环境变量来处理加密的代码，
+  # 可以在此处添加 --build-arg 或 ENV 参数。
+  # 例如：- '--build-arg'
+  #      - 'DECRYPTION_KEY=${_DECRYPTION_KEY}' # 假设_DECRYPTION_KEY是一个秘密替换变量或普通替换变量
+
+# 步骤2: 推送Docker镜像到Artifact Registry
+# 使用gcr.io/cloud-builders/docker构建器将标记的镜像推送到目标Artifact Registry仓库。
+- name: 'gcr.io/cloud-builders/docker'
+  id: '推送至Artifact Registry' # 步骤ID
+  args:
+  - 'push'
+  - 'us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME}'
+
+# 步骤3: 在测试实例上进行Docker运行测试
+# 使用gcr.io/google.com/cloudsdktool/cloud-sdk构建器连接到GCE实例并执行命令。
+# entrypoint设置为bash以便执行多行命令。
+# --command 参数用于在远程实例上执行一系列Docker命令。
+# 1. sudo docker stop nginx-test-container || true: 停止名为nginx-test-container的容器（如果存在），'|| true'确保即使停止失败也不会中断脚本。
+# 2. sudo docker rm nginx-test-container || true: 删除旧的容器（如果存在）。
+# 3. sudo docker pull ...: 从Artifact Registry拉取新构建的Docker镜像。
+# 4. sudo docker run -d ...: 在后台(-d)运行新拉取的镜像，并命名为nginx-test-container，将容器的80端口映射到主机的80端口。
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: '在VM上部署和测试' # 步骤ID
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    # 使用gcloud compute ssh命令连接到GCE实例并执行Docker命令。
+    # 替换'gcp-support-test-347006'为您的GCP项目ID。
+    # 确保Cloud Build服务帐号拥有SSH到此VM的权限。
+    gcloud compute ssh tp-link-dev-gpu-2 --zone=us-central1-c --project=gcp-support-test-347006 --strict-host-key-checking=no --command "\
+      sudo docker stop nginx-test-container || true && \
+      sudo docker rm nginx-test-container || true && \
+      sudo docker pull us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME} && \
+      sudo docker run -d --name nginx-test-container -p 80:80 us-east1-docker.pkg.dev/gcp-support-test-347006/wengyisheng/${_IMAGE_NAME}:${TAG_NAME} \
+    "
+    echo "已在tp-link-dev-gpu-2上启动部署和测试。"
+
+# 替换变量 (Substitutions)
+# 您可以在Cloud Build触发器中定义或覆盖这些变量。
+substitutions:
+  _IMAGE_NAME: 'nginx-test' # Docker镜像的名称，这里默认为'nginx-test'。
+
+# 构建选项
+options:
+  # log options 可以是 CLOUD_LOGGING_ONLY (默认) 或 GCS_AND_CLOUD_LOGGING
+  logging: CLOUD_LOGGING_ONLY
+  # machineType 可以设置为E2_HIGHCPU_8等更高的机器类型以加快构建速度
+  machineType: 'E2_HIGHCPU_8'
