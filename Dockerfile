@@ -1,5 +1,5 @@
-# 第一阶段：下载文件和安装工具
-FROM ubuntu:22.04 as downloader
+# 使用 Ubuntu 作为基础镜像
+FROM ubuntu:22.04
 
 # 设置环境变量以避免交互提示
 ENV DEBIAN_FRONTEND=noninteractive
@@ -11,7 +11,8 @@ RUN mkdir -p /app/checkpoints && \
     ca-certificates \
     curl \
     gnupg \
-    wget && \
+    wget \
+    nginx && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /etc/apt/keyrings/cloud.google.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee /etc/apt/sources.list.d/google-cloud-sdk.list && \
@@ -22,12 +23,6 @@ RUN mkdir -p /app/checkpoints && \
 
 # 使用 gsutil 从 Google Cloud Storage 下载文件
 RUN gsutil -m cp -r gs://zhangyinghui-test/* /app/checkpoints/
-
-# 第二阶段：构建最终镜像
-FROM nginx:1.25-alpine
-
-# 复制下载的文件
-COPY --from=downloader /app/checkpoints /app/checkpoints
 
 # 复制自定义HTML文件
 COPY ./index.html /usr/share/nginx/html/index.html 
