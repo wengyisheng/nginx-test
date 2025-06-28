@@ -21,8 +21,8 @@ RUN mkdir -p /app/checkpoints && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 使用 gsutil 从 Google Cloud Storage 下载文件
-RUN gsutil -m cp -r gs://zhangyinghui-test/* /app/checkpoints/
+RUN mkdir -p /app/checkpoints
+COPY checkpoints/ /app/checkpoints
 
 # 复制自定义HTML文件
 COPY ./index.html /usr/share/nginx/html/index.html 
